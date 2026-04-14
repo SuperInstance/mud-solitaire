@@ -138,42 +138,86 @@ class Game:
 # Simple AI player
 # ═══════════════════════════════════════
 def ai_play_step(game):
-    """One AI move. Returns command string."""
-    # Try auto-foundation first
+    """Smart AI move. Avoids loops by tracking history."""
+    if not hasattr(game, '_ai_history'):
+        game._ai_history = []
+        game._ai_draws = 0
+    
+    def try_move(desc, func):
+        result = func()
+        if result:
+            game._ai_history.append(desc)
+            game._ai_draws = 0
+            return desc
+        return None
+    
+    # Priority 1: Move to foundation (always correct)
     for ci in range(7):
         col = game.tab[ci]
         if col and col[-1].face_up:
             for fi in range(4):
                 if game._can_found(col[-1], fi):
                     game.move_t2f(ci, fi)
-                    return f"move col {ci+1} to foundation {fi+1}"
+                    desc = f"move col {ci+1} to foundation {fi+1}"
+                    game._ai_history.append(desc)
+                    game._ai_draws = 0
+                    return desc
     
-    # Try waste to foundation
+    # Priority 2: Waste to foundation
     if game.waste:
         for fi in range(4):
             if game._can_found(game.waste[-1], fi):
                 game.move_w2f(fi)
-                return f"move waste to foundation {fi+1}"
+                desc = f"move waste to foundation {fi+1}"
+                game._ai_history.append(desc)
+                game._ai_draws = 0
+                return desc
     
-    # Try waste to tableau
+    # Priority 3: Uncover face-down cards (move from tableau with face-down cards)
+    for ci in range(7):
+        col = game.tab[ci]
+        if col and len(col) > 1 and col[-1].face_up and not col[-2].face_up:
+            for ti in range(7):
+                if ti != ci and game._can_tab(col[-1], ti):
+                    game.move_t2t(ci, ti)
+                    desc = f"move col {ci+1} to col {ti+1} (uncover)"
+                    game._ai_history.append(desc)
+                    game._ai_draws = 0
+                    return desc
+    
+    # Priority 4: Waste to tableau
     if game.waste:
         for ci in range(7):
             if game._can_tab(game.waste[-1], ci):
                 game.move_w2t(ci)
-                return f"move waste to tableau {ci+1}"
+                desc = f"move waste to tableau {ci+1}"
+                game._ai_history.append(desc)
+                game._ai_draws = 0
+                return desc
     
-    # Try tableau to tableau
+    # Priority 5: Other tableau moves (avoid loops)
     for ci in range(7):
         col = game.tab[ci]
         if col and len(col) > 1 and col[-1].face_up:
             for ti in range(7):
                 if ti != ci and game._can_tab(col[-1], ti):
-                    game.move_t2t(ci, ti)
-                    return f"move col {ci+1} to col {ti+1}"
+                    desc = f"move col {ci+1} to col {ti+1}"
+                    if desc not in game._ai_history[-5:]:  # Don't repeat recent moves
+                        game.move_t2t(ci, ti)
+                        game._ai_history.append(desc)
+                        game._ai_draws = 0
+                        return desc
     
-    # Draw
+    # Priority 6: Draw (with stuck detection)
+    game._ai_draws += 1
+    if game._ai_draws > 10:
+        return "__stuck__"  # Signal to give up or start new game
+    
     game.draw()
+    game._ai_history.append("draw")
     return "draw"
+
+
 
 # ═══════════════════════════════════════
 # Main loop
@@ -195,6 +239,13 @@ def main():
             if ai_mode:
                 if game.won():
                     print("\n🎉 AI WON THE GAME!")
+                if cmd == "__stuck__":
+                    print("\n🤔 Agent is stuck. Starting new game...")
+                    game.reset()
+                    game._ai_history = []
+                    game._ai_draws = 0
+                    print(game.render())
+                    continue
                     ai_mode = False
                     continue
                 time.sleep(0.5)
