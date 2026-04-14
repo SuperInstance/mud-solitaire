@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html><head>
+<title>MUD Solitaire — Visual</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a472a; color: white; font-family: 'Courier New', monospace; overflow: hidden; }
+#header { text-align: center; padding: 8px; background: #0d2818; font-size: 14px; color: #4a9; }
+#header span { color: #7e5; }
+#game { display: flex; flex-direction: column; align-items: center; padding: 10px; }
+.row { display: flex; gap: 8px; margin: 6px 0; }
+.card {
+  width: 60px; height: 84px; border-radius: 6px; display: flex;
+  align-items: center; justify-content: center; font-size: 16px;
+  font-weight: bold; cursor: pointer; transition: transform 0.15s;
+  position: relative; user-select: none;
+}
+.card:hover { transform: translateY(-3px); }
+.card.face-up { background: white; color: black; border: 2px solid #ccc; box-shadow: 2px 2px 8px rgba(0,0,0,0.3); }
+.card.face-up.red { color: #d22; }
+.card.face-down { background: linear-gradient(135deg, #234, #456); border: 2px solid #567; }
+.card.face-down::after { content: "🂠"; font-size: 28px; }
+.card.empty { background: rgba(255,255,255,0.1); border: 2px dashed rgba(255,255,255,0.2); }
+.card.foundation { border-color: #fc0; }
+.slot-label { font-size: 11px; color: #4a9; text-align: center; width: 60px; }
+#tableau { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
+.column { display: flex; flex-direction: column; gap: 2px; min-height: 84px; }
+.column .card { margin-top: -60px; }
+.column .card:first-child { margin-top: 0; }
+#log { position: fixed; bottom: 0; left: 0; right: 0; background: #0d2818; 
+  padding: 6px 12px; font-size: 12px; color: #4a9; max-height: 80px; overflow-y: auto; }
+#log .cmd { color: #7e5; }
+#log .err { color: #f66; }
+</style>
+</head><body>
+<div id="header">🃏 <span>MUD SOLITAIRE</span> — Visual Mirror | Controlled by text commands</div>
+<div id="game">
+  <div class="row">
+    <div><div class="slot-label">STOCK</div><div id="stock" class="card face-down" onclick="draw()"></div></div>
+    <div><div class="slot-label">WASTE</div><div id="waste" class="card empty"></div></div>
+    <div style="width:40px"></div>
+    <div><div class="slot-label">F1</div><div id="f0" class="card empty foundation" onclick="w2f(0)"></div></div>
+    <div><div class="slot-label">F2</div><div id="f1" class="card empty foundation" onclick="w2f(1)"></div></div>
+    <div><div class="slot-label">F3</div><div id="f2" class="card empty foundation" onclick="w2f(2)"></div></div>
+    <div><div class="slot-label">F4</div><div id="f3" class="card empty foundation" onclick="w2f(3)"></div></div>
+  </div>
+  <div id="tableau"></div>
+</div>
+<div id="log"></div>
+<script>
+const SUITS = ["♥","♠","♦","♣"];
+const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const RV = {}; RANKS.forEach((r,i)=>RV[r]=i);
+
+let G = null;
+function mkDeck(){ let d=[]; SUITS.forEach(s=>RANKS.forEach(r=>d.push({s,r,up:false}))); return d.sort(()=>Math.random()-0.5); }
+
+function newGame(){
+  let deck=mkDeck();
+  G={tab:[],stock:deck.splice(0,24),waste:[],found:[[],[],[],[]],score:0,moves:0};
+  for(let i=0;i<7;i++){G.tab[i]=[];for(let j=0;j<=i;j++){let c=deck.pop();c.up=(j===i);G.tab[i].push(c);}}
+  render(); log("New game started.");
+}
+
+function isRed(c){return c.s==="♥"||c.s==="♦";}
+function canFound(c,fi){let p=G.found[fi];if(!p.length)return c.r==="A";return c.s===p[p.length-1].s&&RV[c.r]===RV[p[p.length-1].r]+1;}
+function canTab(c,ci){let col=G.tab[ci];if(!col.length)return c.r==="K";let t=col[col.length-1];return t.up&&isRed(c)!==isRed(t)&&RV[c.r]===RV[t.r]-1;}
+
+function draw(){
+  if(G.stock.length){let c=G.stock.pop();c.up=true;G.waste.push(c);G.moves++;log("Drew "+c.r+c.s);}
+  else if(G.waste.length){G.stock=G.waste.reverse();G.stock.forEach(c=>c.up=false);G.waste=[];log("Recycled stock.");}
+  else{log("Nothing to draw.","err");}
+  render();
+}
+
+function w2f(fi){
+  if(!G.waste.length){log("No waste card.","err");return;}
+  let c=G.waste[G.waste.length-1];
+  if(canFound(c,fi)){G.waste.pop();G.found[fi].push(c);G.score+=10;G.moves++;log(c.r+c.s+" → foundation "+(fi+1));render();}
+  else log("Can't move "+c.r+c.s+" there.","err");
+}
+
+function w2t(ci){
+  if(!G.waste.length){log("No waste card.","err");return;}
+  let c=G.waste[G.waste.length-1];
+  if(canTab(c,ci)){G.waste.pop();G.tab[ci].push(c);G.score+=5;G.moves++;log(c.r+c.s+" → col "+(ci+1));render();}
+  else log("Can't move "+c.r+c.s+" there.","err");
+}
+
+function t2f(ci,fi){
+  let col=G.tab[ci];if(!col.length||!col[col.length-1].up){log("No card to move.","err");return;}
+  let c=col[col.length-1];
+  if(canFound(c,fi)){col.pop();G.found[fi].push(c);G.score+=10;G.moves++;
+    if(col.length&&!col[col.length-1].up){col[col.length-1].up=true;G.score+=5;}
+    log(c.r+c.s+" → foundation "+(fi+1));render();}
+  else log("Can't move "+c.r+c.s+" there.","err");
+}
+
+function t2t(ci,ti){
+  if(ci===ti){log("Same column.","err");return;}
+  let src=G.tab[ci];if(!src.length){log("Empty source.","err");return;}
+  let si=src.length-1;while(si>0&&src[si-1].up)si--;
+  let c=src[si];
+  if(canTab(c,ti)){
+    let cards=src.splice(si);G.tab[ti]=G.tab[ti].concat(cards);G.moves++;
+    if(src.length&&!src[src.length-1].up){src[src.length-1].up=true;G.score+=5;}
+    log(c.r+c.s+" → col "+(ti+1));render();}
+  else log("Can't move "+c.r+c.s+" to col "+(ti+1)+".","err");
+}
+
+function autoMove(){
+  let moved=0,changed=true;
+  while(changed){changed=false;
+    if(G.waste.length){for(let fi=0;fi<4;fi++)if(canFound(G.waste[G.waste.length-1],fi)){let c=G.waste.pop();G.found[fi].push(c);G.score+=10;G.moves++;moved++;changed=true;break;}}
+    for(let ci=0;ci<7;ci++){let col=G.tab[ci];if(col.length&&col[col.length-1].up){for(let fi=0;fi<4;fi++)if(canFound(col[col.length-1],fi)){col.pop();G.found[fi].push(c);G.score+=10;G.moves++;
+      if(col.length&&!col[col.length-1].up){col[col.length-1].up=true;G.score+=5;}moved++;changed=true;break;}}}
+  }
+  log("Auto-moved "+moved+" cards.");render();
+}
+
+function cardHTML(c,cls=''){
+  if(!c)return '<div class="card empty '+cls+'"></div>';
+  let color=isRed(c)?'red':'';
+  return '<div class="card face-up '+color+' '+cls+'">'+c.r+c.s+'</div>';
+}
+
+function render(){
+  // Stock
+  document.getElementById('stock').className = G.stock.length ? 'card face-down' : 'card empty';
+  document.getElementById('stock').innerHTML = G.stock.length ? '' : '';
+  // Waste
+  document.getElementById('waste').innerHTML = G.waste.length ? G.waste[G.waste.length-1].r+G.waste[G.waste.length-1].s : '';
+  document.getElementById('waste').className = G.waste.length ? 'card face-up '+(isRed(G.waste[G.waste.length-1])?'red':'') : 'card empty';
+  // Foundations
+  for(let fi=0;fi<4;fi++){
+    let el=document.getElementById('f'+fi);
+    let p=G.found[fi];
+    if(p.length){el.innerHTML=p[p.length-1].r+p[p.length-1].s;el.className='card face-up foundation '+(isRed(p[p.length-1])?'red':'');}
+    else{el.innerHTML='';el.className='card empty foundation';}
+  }
+  // Tableau
+  let html='';
+  for(let ci=0;ci<7;ci++){
+    html+='<div class="column" onclick="t2f('+ci+',findBestFoundation('+ci+'))">';
+    if(!G.tab[ci].length)html+='<div class="card empty"></div>';
+    for(let c of G.tab[ci]){
+      if(c.up)html+='<div class="card face-up '+(isRed(c)?'red':'')+'">'+c.r+c.s+'</div>';
+      else html+='<div class="card face-down"></div>';
+    }
+    html+='</div>';
+  }
+  document.getElementById('tableau').innerHTML=html;
+  // Title
+  document.getElementById('header').innerHTML='🃏 <span>MUD SOLITAIRE</span> — Score: '+G.score+' | Moves: '+G.moves+(G.found.every(f=>f.length===13)?' | 🎉 WON!':'');
+}
+
+function findBestFoundation(ci){
+  let c=G.tab[ci];if(!c.length)return 0;
+  c=c[c.length-1];for(let fi=0;fi<4;fi++)if(canFound(c,fi))return fi;return 0;
+}
+
+function log(msg,cls='cmd'){
+  let d=document.getElementById('log');
+  d.innerHTML='<div class="'+cls+'">> '+msg+'</div>'+d.innerHTML;
+  if(d.children.length>20)d.removeChild(d.lastChild);
+}
+
+// Command API for external control (Playwright/bridge)
+window.mudCmd = function(cmd){
+  cmd=cmd.toLowerCase().trim();
+  if(cmd==='new'){newGame();return'New game.';}
+  if(cmd==='draw'){draw();return'Drew card.';}
+  if(cmd==='auto'){autoMove();return'Auto-completed.';}
+  if(cmd.startsWith('move')){
+    let parts=cmd.split(/\s+/);
+    if(parts.includes('waste')&&parts.includes('foundation')){let fi=parseInt(parts[parts.length-1])-1;w2f(fi>=0?fi:0);return'done';}
+    if(parts.includes('waste')&&cmd.match(/t\d/)){let ci=parseInt(cmd.match(/t(\d+)/)[1])-1;w2t(ci);return'done';}
+    if(cmd.match(/c\d+.*f\d+/)){let ci=parseInt(cmd.match(/c(\d+)/)[1])-1;let fi=parseInt(cmd.match(/f(\d+)/)[1])-1;t2f(ci,fi);return'done';}
+    if(cmd.match(/c\d+.*c\d+/)){let ms=cmd.match(/c(\d+).*c(\d+)/);t2t(parseInt(ms[1])-1,parseInt(ms[2])-1);return'done';}
+  }
+  if(cmd==='look'){let s='Stock:'+G.stock.length+' Waste:'+(G.waste.length?G.waste[G.waste.length-1].r+G.waste[G.waste.length-1].s:'---');for(let i=0;i<4;i++)s+=' F'+(i+1)+':'+(G.found[i].length?G.found[i][G.found[i].length-1].r+G.found[i][G.found[i].length-1].s:'___');return s;}
+  return'Unknown: '+cmd;
+};
+
+// Bridge API — external script calls this to sync state
+window.mudSync = function(state){
+  G.stock=state.stock.map(c=>({s:c.suit,r:c.rank,up:c.face_up}));
+  G.waste=(state.waste||[]).map(c=>({s:c.suit,r:c.rank,up:c.face_up}));
+  G.found=(state.foundations||[]).map(f=>f.map(c=>({s:c.suit,r:c.rank,up:c.face_up})));
+  G.tab=(state.tableau||[]).map(col=>col.map(c=>({s:c.suit,r:c.rank,up:c.face_up})));
+  G.score=state.score;G.moves=state.moves;
+  render();
+};
+
+// Expose state for bridge
+window.mudState = function(){
+  return JSON.stringify({stock:G.stock.length,waste:G.waste.map(c=>({suit:c.s,rank:c.r,face_up:c.up})),
+    foundations:G.found.map(f=>f.map(c=>({suit:c.s,rank:c.r,face_up:c.up}))),
+    tableau:G.tab.map(col=>col.map(c=>({suit:c.s,rank:c.r,face_up:c.up}))),
+    score:G.score,moves:G.moves,won:G.found.every(f=>f.length===13)});
+};
+
+newGame();
+log("Ready. Click stock to draw, click cards to move.");
+log("Or use commands: draw, move, auto, new");
+</script>
+</body></html>
